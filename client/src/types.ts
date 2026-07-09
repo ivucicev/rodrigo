@@ -12,6 +12,7 @@ export interface ChemicalAddition {
 
 export interface WaterTest {
   id: number;
+  poolId: string;
   ph: number;
   freeChlorine: number;
   totalAlkalinity: number;
@@ -25,6 +26,7 @@ export interface WaterTest {
 }
 
 export interface NewWaterTestInput {
+  poolId: string;
   ph: number;
   freeChlorine: number;
   totalAlkalinity: number;
@@ -38,6 +40,7 @@ export interface NewWaterTestInput {
 
 export interface Chore {
   id: string;
+  poolId: string;
   phase: number;
   label: string;
   description: string;
@@ -49,8 +52,16 @@ export type UnitSystem = 'metric' | 'imperial';
 
 export interface Settings {
   unitSystem: UnitSystem;
-  poolVolumeLiters: number;
+  activePoolId: string;
 }
+
+export interface Pool {
+  id: string;
+  name: string;
+  volumeLiters: number;
+}
+
+export type NewPoolInput = Omit<Pool, 'id'>;
 
 export type ChemicalRole = 'raise_alkalinity' | 'raise_ph' | 'lower_ph' | 'raise_chlorine' | 'algaecide' | 'other';
 export type ChemicalForm = 'liquid' | 'powder' | 'tablet' | 'granule';

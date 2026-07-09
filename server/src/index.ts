@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'node:crypto';
-import { db } from './db.js';
-import type { WaterTestRow, ChemicalAdditionRow, ChoreRow, SettingsRow, ChemicalRow, ChemicalRole, ChemicalForm } from './types.js';
+import { db, DEFAULT_POOL_ID, seedChoresForPool } from './db.js';
+import type { WaterTestRow, ChemicalAdditionRow, ChoreRow, SettingsRow, ChemicalRow, ChemicalRole, ChemicalForm, PoolRow } from './types.js';
 
 const app = express();
 app.use(cors());
@@ -19,7 +19,7 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 function loadTest(id: number): WaterTestRow | undefined {
   const row = db
     .prepare(
-      `SELECT id, ph, free_chlorine as freeChlorine, total_alkalinity as totalAlkalinity,
+      `SELECT id, pool_id as poolId, ph, free_chlorine as freeChlorine, total_alkalinity as totalAlkalinity,
               temperature, temp_unit as tempUnit, notes, record_date as recordDate,
               record_time as recordTime, created_at as createdAt
        FROM water_tests WHERE id = ?`
@@ -32,14 +32,18 @@ function loadTest(id: number): WaterTestRow | undefined {
   return { ...row, additions };
 }
 
-app.get('/api/tests', (_req, res) => {
-  const ids = db.prepare('SELECT id FROM water_tests ORDER BY record_date DESC, record_time DESC, id DESC').all() as { id: number }[];
+app.get('/api/tests', (req, res) => {
+  const poolId = String(req.query.poolId || DEFAULT_POOL_ID);
+  const ids = db
+    .prepare('SELECT id FROM water_tests WHERE pool_id = ? ORDER BY record_date DESC, record_time DESC, id DESC')
+    .all(poolId) as { id: number }[];
   const tests = ids.map((r) => loadTest(r.id));
   res.json(tests);
 });
 
 app.post('/api/tests', (req, res) => {
-  const { ph, freeChlorine, totalAlkalinity, temperature, tempUnit, notes, recordDate, recordTime, additions } = req.body as {
+  const { poolId, ph, freeChlorine, totalAlkalinity, temperature, tempUnit, notes, recordDate, recordTime, additions } = req.body as {
+    poolId?: string;
     ph: number;
     freeChlorine: number;
     totalAlkalinity: number;
@@ -57,10 +61,11 @@ app.post('/api/tests', (req, res) => {
   }
 
   const insertTest = db.prepare(
-    `INSERT INTO water_tests (ph, free_chlorine, total_alkalinity, temperature, temp_unit, notes, record_date, record_time, created_at)
-     VALUES (@ph, @freeChlorine, @totalAlkalinity, @temperature, @tempUnit, @notes, @recordDate, @recordTime, @createdAt)`
+    `INSERT INTO water_tests (pool_id, ph, free_chlorine, total_alkalinity, temperature, temp_unit, notes, record_date, record_time, created_at)
+     VALUES (@poolId, @ph, @freeChlorine, @totalAlkalinity, @temperature, @tempUnit, @notes, @recordDate, @recordTime, @createdAt)`
   );
   const info = insertTest.run({
+    poolId: poolId || DEFAULT_POOL_ID,
     ph,
     freeChlorine,
     totalAlkalinity,
@@ -86,13 +91,14 @@ app.post('/api/tests', (req, res) => {
 
 // ---------- Chores ----------
 
-app.get('/api/chores', (_req, res) => {
+app.get('/api/chores', (req, res) => {
+  const poolId = String(req.query.poolId || DEFAULT_POOL_ID);
   const rows = db
     .prepare(
-      `SELECT id, phase, label, description, recurrence_hours as recurrenceHours, completed_at as completedAt
-       FROM chores ORDER BY phase ASC, id ASC`
+      `SELECT id, pool_id as poolId, phase, label, description, recurrence_hours as recurrenceHours, completed_at as completedAt
+       FROM chores WHERE pool_id = ? ORDER BY phase ASC, id ASC`
     )
-    .all() as ChoreRow[];
+    .all(poolId) as ChoreRow[];
   res.json(rows);
 });
 
@@ -107,7 +113,7 @@ app.post('/api/chores/:id/toggle', (req, res) => {
   }
   const row = db
     .prepare(
-      `SELECT id, phase, label, description, recurrence_hours as recurrenceHours, completed_at as completedAt
+      `SELECT id, pool_id as poolId, phase, label, description, recurrence_hours as recurrenceHours, completed_at as completedAt
        FROM chores WHERE id = ?`
     )
     .get(id) as ChoreRow;
@@ -122,7 +128,7 @@ function readSettings(): SettingsRow {
   for (const r of rows) settings[r.key] = r.value;
   return {
     unitSystem: (settings.unitSystem as 'metric' | 'imperial') ?? 'metric',
-    poolVolumeLiters: Number(settings.poolVolumeLiters ?? 56800),
+    activePoolId: settings.activePoolId ?? DEFAULT_POOL_ID,
   };
 }
 
@@ -137,8 +143,75 @@ const putSetting = db.prepare(
 app.put('/api/settings', (req, res) => {
   const body = req.body as Partial<SettingsRow>;
   if (body.unitSystem === 'metric' || body.unitSystem === 'imperial') putSetting.run('unitSystem', body.unitSystem);
-  if (typeof body.poolVolumeLiters === 'number' && body.poolVolumeLiters > 0) putSetting.run('poolVolumeLiters', String(body.poolVolumeLiters));
+  if (typeof body.activePoolId === 'string' && body.activePoolId) {
+    const pool = db.prepare('SELECT id FROM pools WHERE id = ?').get(body.activePoolId);
+    if (!pool) {
+      res.status(400).json({ error: 'unknown pool' });
+      return;
+    }
+    putSetting.run('activePoolId', body.activePoolId);
+  }
   res.json(readSettings());
+});
+
+// ---------- Pools ----------
+
+function loadPool(id: string): PoolRow | undefined {
+  return db.prepare('SELECT id, name, volume_liters as volumeLiters FROM pools WHERE id = ?').get(id) as PoolRow | undefined;
+}
+
+app.get('/api/pools', (_req, res) => {
+  const rows = db.prepare('SELECT id, name, volume_liters as volumeLiters FROM pools ORDER BY rowid ASC').all() as PoolRow[];
+  res.json(rows);
+});
+
+app.post('/api/pools', (req, res) => {
+  const { name, volumeLiters } = req.body as { name?: string; volumeLiters?: number };
+  if (!name?.trim() || typeof volumeLiters !== 'number' || volumeLiters <= 0) {
+    res.status(400).json({ error: 'name and a positive volumeLiters are required' });
+    return;
+  }
+  const id = crypto.randomUUID();
+  db.prepare('INSERT INTO pools (id, name, volume_liters) VALUES (?, ?, ?)').run(id, name.trim(), volumeLiters);
+  seedChoresForPool(id);
+  res.status(201).json(loadPool(id));
+});
+
+app.put('/api/pools/:id', (req, res) => {
+  const { id } = req.params;
+  const existing = loadPool(id);
+  if (!existing) {
+    res.status(404).json({ error: 'pool not found' });
+    return;
+  }
+  const body = req.body as Partial<PoolRow>;
+  const name = body.name?.trim() || existing.name;
+  const volumeLiters = typeof body.volumeLiters === 'number' && body.volumeLiters > 0 ? body.volumeLiters : existing.volumeLiters;
+  db.prepare('UPDATE pools SET name = ?, volume_liters = ? WHERE id = ?').run(name, volumeLiters, id);
+  res.json(loadPool(id));
+});
+
+app.delete('/api/pools/:id', (req, res) => {
+  const { id } = req.params;
+  const count = db.prepare('SELECT COUNT(*) as c FROM pools').get() as { c: number };
+  if (count.c <= 1) {
+    res.status(400).json({ error: 'cannot delete the last remaining pool' });
+    return;
+  }
+  const result = db.prepare('DELETE FROM pools WHERE id = ?').run(id);
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'pool not found' });
+    return;
+  }
+  db.prepare('DELETE FROM water_tests WHERE pool_id = ?').run(id);
+  db.prepare('DELETE FROM chores WHERE pool_id = ?').run(id);
+
+  const activePoolRow = db.prepare("SELECT value FROM settings WHERE key = 'activePoolId'").get() as { value: string } | undefined;
+  if (activePoolRow?.value === id) {
+    const fallback = db.prepare('SELECT id FROM pools ORDER BY rowid ASC LIMIT 1').get() as { id: string };
+    putSetting.run('activePoolId', fallback.id);
+  }
+  res.status(204).send();
 });
 
 // ---------- Chemicals ----------

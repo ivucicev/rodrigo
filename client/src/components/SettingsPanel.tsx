@@ -1,13 +1,18 @@
 import { useState } from 'react';
-import { Plus, Trash2, X } from 'lucide-react';
-import type { ChemicalForm, ChemicalRole, NewUserChemicalInput, Settings, UnitSystem, UserChemical } from '../types';
+import { Check, Plus, Trash2, X } from 'lucide-react';
+import type { ChemicalForm, ChemicalRole, NewPoolInput, NewUserChemicalInput, Pool, Settings, UnitSystem, UserChemical } from '../types';
 import { litersToPoolVolumeInput, poolVolumeInputUnit, poolVolumeToLiters } from '../utils/units';
 
 interface SettingsPanelProps {
   settings: Settings;
+  pools: Pool[];
   chemicals: UserChemical[];
   onClose: () => void;
   onSave: (settings: Settings) => void;
+  onSwitchPool: (id: string) => void;
+  onAddPool: (input: NewPoolInput) => void;
+  onUpdatePool: (id: string, patch: Partial<NewPoolInput>) => void;
+  onDeletePool: (id: string) => void;
   onAddChemical: (input: NewUserChemicalInput) => void;
   onUpdateChemical: (id: string, patch: Partial<NewUserChemicalInput>) => void;
   onDeleteChemical: (id: string) => void;
@@ -54,6 +59,77 @@ function SegmentedControl<T extends string>({
           {opt.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function PoolCard({
+  pool,
+  active,
+  unitSystem,
+  canDelete,
+  onSwitch,
+  onUpdate,
+  onDelete,
+}: {
+  pool: Pool;
+  active: boolean;
+  unitSystem: UnitSystem;
+  canDelete: boolean;
+  onSwitch: () => void;
+  onUpdate: (patch: Partial<NewPoolInput>) => void;
+  onDelete: () => void;
+}) {
+  const [name, setName] = useState(pool.name);
+  const [volumeInput, setVolumeInput] = useState(String(litersToPoolVolumeInput(pool.volumeLiters, unitSystem)));
+
+  return (
+    <div className={`rounded-xl border-2 p-3 ${active ? 'border-emerald-600/40 bg-emerald-50/40' : 'border-slate-100 bg-slate-50/60'}`}>
+      <div className="flex items-start gap-2">
+        <button
+          onClick={onSwitch}
+          aria-label={active ? `${pool.name} is active` : `Switch to ${pool.name}`}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 transition-colors ${
+            active ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-transparent hover:border-emerald-400'
+          }`}
+        >
+          <Check size={15} />
+        </button>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => name.trim() && onUpdate({ name: name.trim() })}
+          placeholder="Pool name"
+          className="flex-1 rounded-lg border-2 border-slate-800/10 bg-white px-2.5 py-1.5 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-600/40"
+        />
+        <button
+          onClick={onDelete}
+          disabled={!canDelete}
+          aria-label={`Remove ${pool.name}`}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+
+      <label className="mt-2 flex items-center justify-between gap-3 text-sm text-slate-500">
+        Volume
+        <span className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={0}
+            value={volumeInput}
+            onChange={(e) => setVolumeInput(e.target.value)}
+            onBlur={() => {
+              const liters = poolVolumeToLiters(Number(volumeInput) || 0, unitSystem);
+              if (liters > 0) onUpdate({ volumeLiters: liters });
+            }}
+            className="w-24 rounded-lg border-2 border-slate-800/10 bg-white px-2 py-1 text-right text-sm font-semibold text-slate-800 outline-none focus:border-emerald-600/40"
+          />
+          <span className="text-xs font-medium text-slate-400">{poolVolumeInputUnit(unitSystem)}</span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -187,29 +263,27 @@ function ChemicalCard({
 
 export default function SettingsPanel({
   settings,
+  pools,
   chemicals,
   onClose,
   onSave,
+  onSwitchPool,
+  onAddPool,
+  onUpdatePool,
+  onDeletePool,
   onAddChemical,
   onUpdateChemical,
   onDeleteChemical,
 }: SettingsPanelProps) {
-  const [draft, setDraft] = useState<Settings>(settings);
-  const [volumeInput, setVolumeInput] = useState(String(litersToPoolVolumeInput(settings.poolVolumeLiters, settings.unitSystem)));
+  const [unitSystem, setUnitSystem] = useState<UnitSystem>(settings.unitSystem);
 
-  function patch(p: Partial<Settings>) {
-    setDraft((prev) => ({ ...prev, ...p }));
+  function handleSaveUnitSystem(next: UnitSystem) {
+    setUnitSystem(next);
+    onSave({ ...settings, unitSystem: next });
   }
 
-  function changeUnitSystem(unitSystem: UnitSystem) {
-    const liters = poolVolumeToLiters(Number(volumeInput) || 0, draft.unitSystem);
-    setVolumeInput(String(litersToPoolVolumeInput(liters, unitSystem)));
-    patch({ unitSystem });
-  }
-
-  function handleSave() {
-    const liters = poolVolumeToLiters(Number(volumeInput) || 0, draft.unitSystem);
-    onSave({ ...draft, poolVolumeLiters: liters });
+  function handleAddPool() {
+    onAddPool({ name: 'New Pool', volumeLiters: 15000 });
   }
 
   function handleAddChemical() {
@@ -238,8 +312,8 @@ export default function SettingsPanel({
           <section>
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Unit System</h3>
             <SegmentedControl
-              value={draft.unitSystem}
-              onChange={changeUnitSystem}
+              value={unitSystem}
+              onChange={handleSaveUnitSystem}
               options={[
                 { value: 'metric', label: 'Metric' },
                 { value: 'imperial', label: 'Imperial' },
@@ -248,25 +322,34 @@ export default function SettingsPanel({
           </section>
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Pool Volume</h3>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                value={volumeInput}
-                onChange={(e) => setVolumeInput(e.target.value)}
-                className="w-full rounded-lg border-2 border-slate-800/10 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-600/40 focus:bg-white"
-              />
-              <span className="text-sm font-medium text-slate-400">{poolVolumeInputUnit(draft.unitSystem)}</span>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Pools</h3>
+              <button
+                onClick={handleAddPool}
+                className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100"
+              >
+                <Plus size={13} />
+                Add
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-slate-400">
+              Each pool keeps its own volume, test history, and maintenance checklist. Tap the checkmark to switch which one is active.
+            </p>
+            <div className="space-y-3">
+              {pools.map((pool) => (
+                <PoolCard
+                  key={pool.id}
+                  pool={pool}
+                  active={pool.id === settings.activePoolId}
+                  unitSystem={unitSystem}
+                  canDelete={pools.length > 1}
+                  onSwitch={() => onSwitchPool(pool.id)}
+                  onUpdate={(p) => onUpdatePool(pool.id, p)}
+                  onDelete={() => onDeletePool(pool.id)}
+                />
+              ))}
             </div>
           </section>
-
-          <button
-            onClick={handleSave}
-            className="w-full rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800"
-          >
-            Save Settings
-          </button>
 
           <section className="border-t border-slate-100 pt-5">
             <div className="mb-2 flex items-center justify-between">
@@ -281,7 +364,7 @@ export default function SettingsPanel({
             </div>
             <p className="mb-3 text-xs text-slate-400">
               Add exactly what's on your shelf — any brand name, with the strength printed on the label. Dosage recipes only show up for
-              chemicals you've added here.
+              chemicals you've added here. Shared across all pools.
             </p>
 
             {chemicals.length === 0 ? (

@@ -8,6 +8,7 @@ export interface ChemicalAdditionRow {
 
 export interface WaterTestRow {
   id: number;
+  poolId: string;
   ph: number;
   freeChlorine: number;
   totalAlkalinity: number;
@@ -22,6 +23,7 @@ export interface WaterTestRow {
 
 export interface ChoreRow {
   id: string;
+  poolId: string;
   phase: number;
   label: string;
   description: string;
@@ -29,9 +31,15 @@ export interface ChoreRow {
   completedAt: string | null;
 }
 
+export interface PoolRow {
+  id: string;
+  name: string;
+  volumeLiters: number;
+}
+
 export interface SettingsRow {
   unitSystem: 'metric' | 'imperial';
-  poolVolumeLiters: number;
+  activePoolId: string;
 }
 
 export type ChemicalRole = 'raise_alkalinity' | 'raise_ph' | 'lower_ph' | 'raise_chlorine' | 'algaecide' | 'other';

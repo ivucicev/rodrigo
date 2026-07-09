@@ -9,13 +9,13 @@ import SettingsPanel from './components/SettingsPanel';
 import { api } from './api';
 import { computeDosages } from './utils/chemistry';
 import { celsiusToFahrenheit, fahrenheitToCelsius } from './utils/units';
-import type { Chore, DraftTest, NewUserChemicalInput, Settings, UserChemical, WaterTest } from './types';
+import type { Chore, DraftTest, NewPoolInput, NewUserChemicalInput, Pool, Settings, UserChemical, WaterTest } from './types';
 
 const DRAFT_STORAGE_KEY = 'pool-tracker:draft';
 
 const DEFAULT_SETTINGS: Settings = {
   unitSystem: 'metric',
-  poolVolumeLiters: 56800,
+  activePoolId: '',
 };
 
 function nowDateTimeParts() {
@@ -57,6 +57,7 @@ export default function App() {
   const [tests, setTests] = useState<WaterTest[]>([]);
   const [chores, setChores] = useState<Chore[]>([]);
   const [chemicals, setChemicals] = useState<UserChemical[]>([]);
+  const [pools, setPools] = useState<Pool[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -66,32 +67,39 @@ export default function App() {
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
   }, [draft]);
 
-  useEffect(() => {
-    Promise.all([api.getTests(), api.getChores(), api.getSettings(), api.getChemicals()])
-      .then(([testsRes, choresRes, settingsRes, chemicalsRes]) => {
-        setTests(testsRes);
-        setChores(choresRes);
-        setSettings(settingsRes);
-        setChemicals(chemicalsRes);
+  function patchDraft(patch: Partial<DraftTest>) {
+    setDraft((prev) => ({ ...prev, ...patch }));
+  }
 
-        const latest = testsRes[0];
-        if (latest) {
-          setDraft((prev) => ({
-            ...prev,
-            ph: String(latest.ph),
-            freeChlorine: String(latest.freeChlorine),
-            totalAlkalinity: String(latest.totalAlkalinity),
-            temperature: latest.temperature != null ? String(latest.temperature) : '',
-            tempUnit: latest.tempUnit,
-          }));
-        }
+  useEffect(() => {
+    Promise.all([api.getSettings(), api.getPools(), api.getChemicals()])
+      .then(([settingsRes, poolsRes, chemicalsRes]) => {
+        setSettings(settingsRes);
+        setPools(poolsRes);
+        setChemicals(chemicalsRes);
       })
       .catch((err) => setLoadError(err.message));
   }, []);
 
-  function patchDraft(patch: Partial<DraftTest>) {
-    setDraft((prev) => ({ ...prev, ...patch }));
-  }
+  useEffect(() => {
+    if (!settings.activePoolId) return;
+    Promise.all([api.getTests(settings.activePoolId), api.getChores(settings.activePoolId)])
+      .then(([testsRes, choresRes]) => {
+        setTests(testsRes);
+        setChores(choresRes);
+
+        const latest = testsRes[0];
+        setDraft((prev) => ({
+          ...prev,
+          ph: latest ? String(latest.ph) : '',
+          freeChlorine: latest ? String(latest.freeChlorine) : '',
+          totalAlkalinity: latest ? String(latest.totalAlkalinity) : '',
+          temperature: latest?.temperature != null ? String(latest.temperature) : '',
+          tempUnit: latest?.tempUnit ?? prev.tempUnit,
+        }));
+      })
+      .catch((err) => setLoadError(err.message));
+  }, [settings.activePoolId]);
 
   useEffect(() => {
     const expectedUnit = settings.unitSystem === 'metric' ? 'C' : 'F';
@@ -109,7 +117,8 @@ export default function App() {
   const ta = Number(draft.totalAlkalinity);
   const readingsComplete = draft.ph.trim() !== '' && draft.freeChlorine.trim() !== '' && draft.totalAlkalinity.trim() !== '';
 
-  const dosageBase = { poolVolumeLiters: settings.poolVolumeLiters, chemicals };
+  const activePool = pools.find((p) => p.id === settings.activePoolId);
+  const dosageBase = { poolVolumeLiters: activePool?.volumeLiters ?? 56800, chemicals };
 
   const dosages = readingsComplete
     ? computeDosages({ ph, freeChlorine: fc, totalAlkalinity: ta, ...dosageBase })
@@ -127,6 +136,7 @@ export default function App() {
 
     const { recordDate, recordTime } = nowDateTimeParts();
     const created = await api.createTest({
+      poolId: settings.activePoolId,
       ph,
       freeChlorine: fc,
       totalAlkalinity: ta,
@@ -150,7 +160,30 @@ export default function App() {
   async function handleSaveSettings(next: Settings) {
     const updated = await api.updateSettings(next);
     setSettings(updated);
-    setSettingsOpen(false);
+  }
+
+  async function handleSwitchPool(id: string) {
+    const updated = await api.updateSettings({ ...settings, activePoolId: id });
+    setSettings(updated);
+  }
+
+  async function handleAddPool(input: NewPoolInput) {
+    const created = await api.createPool(input);
+    setPools((prev) => [...prev, created]);
+  }
+
+  async function handleUpdatePool(id: string, patch: Partial<NewPoolInput>) {
+    const updated = await api.updatePool(id, patch);
+    setPools((prev) => prev.map((p) => (p.id === id ? updated : p)));
+  }
+
+  async function handleDeletePool(id: string) {
+    await api.deletePool(id);
+    setPools((prev) => prev.filter((p) => p.id !== id));
+    if (settings.activePoolId === id) {
+      const refreshed = await api.getSettings();
+      setSettings(refreshed);
+    }
   }
 
   async function handleAddChemical(input: NewUserChemicalInput) {
@@ -180,23 +213,30 @@ export default function App() {
           </div>
         )}
 
-        <div className="flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
-                  active ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Icon size={15} />
-                {tab.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+            {TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold transition-colors ${
+                    active ? 'bg-emerald-700 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Icon size={15} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+          {pools.length > 1 && activePool && (
+            <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600">
+              {activePool.name}
+            </span>
+          )}
         </div>
 
         {activeTab === 'overview' && (
@@ -218,9 +258,14 @@ export default function App() {
       {settingsOpen && (
         <SettingsPanel
           settings={settings}
+          pools={pools}
           chemicals={chemicals}
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
+          onSwitchPool={handleSwitchPool}
+          onAddPool={handleAddPool}
+          onUpdatePool={handleUpdatePool}
+          onDeletePool={handleDeletePool}
           onAddChemical={handleAddChemical}
           onUpdateChemical={handleUpdateChemical}
           onDeleteChemical={handleDeleteChemical}
