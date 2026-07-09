@@ -1,0 +1,5 @@
+node_modules
+dist
+pool.sqlite3
+pool.sqlite3-wal
+pool.sqlite3-shm
