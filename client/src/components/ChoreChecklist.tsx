@@ -53,7 +53,7 @@ export default function ChoreChecklist({ chores, latestTest, onToggle }: ChoreCh
 
   return (
     <section>
-      <h2 className="mb-4 text-lg font-semibold text-slate-900">Maintenance Checklist</h2>
+      <h2 className="mb-4 text-lg font-semibold text-slate-900">Checks</h2>
 
       {isOverdue && (
         <div className="mb-5 flex items-start gap-3 rounded-xl border-2 border-rose-300 bg-rose-50 px-4 py-3">

@@ -48,8 +48,8 @@ type Tab = 'overview' | 'checklist' | 'history';
 
 const TABS: { id: Tab; label: string; icon: typeof Droplets }[] = [
   { id: 'overview', label: 'Overview', icon: Droplets },
-  { id: 'checklist', label: 'Maintenance Checklist', icon: ClipboardList },
-  { id: 'history', label: 'History Log', icon: Clock },
+  { id: 'checklist', label: 'Checks', icon: ClipboardList },
+  { id: 'history', label: 'Log', icon: Clock },
 ];
 
 export default function App() {

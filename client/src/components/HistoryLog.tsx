@@ -26,7 +26,7 @@ export default function HistoryLog({ tests }: HistoryLogProps) {
     <section>
       <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900">
         <Clock size={18} className="text-emerald-600" />
-        History Log
+        Log
       </h2>
 
       {tests.length === 0 ? (
