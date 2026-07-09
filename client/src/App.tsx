@@ -73,6 +73,18 @@ export default function App() {
         setChores(choresRes);
         setSettings(settingsRes);
         setChemicals(chemicalsRes);
+
+        const latest = testsRes[0];
+        if (latest) {
+          setDraft((prev) => ({
+            ...prev,
+            ph: String(latest.ph),
+            freeChlorine: String(latest.freeChlorine),
+            totalAlkalinity: String(latest.totalAlkalinity),
+            temperature: latest.temperature != null ? String(latest.temperature) : '',
+            tempUnit: latest.tempUnit,
+          }));
+        }
       })
       .catch((err) => setLoadError(err.message));
   }, []);
