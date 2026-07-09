@@ -2,6 +2,20 @@
 
 Pool water chemistry & maintenance tracker. React + TypeScript + Tailwind frontend, Express + better-sqlite3 backend.
 
+## Screenshots
+
+| Overview | Dosage Recipes |
+| --- | --- |
+| ![Overview dashboard](screenshots/overview-dashboard.png) | ![Dosage recipes](screenshots/dosage-recipes.png) |
+
+| Checks | Log |
+| --- | --- |
+| ![Checks tab](screenshots/checks-tab.png) | ![Log tab](screenshots/log-tab.png) |
+
+| Settings — My Chemicals |
+| --- |
+| ![Settings chemicals](screenshots/settings-chemicals.png) |
+
 ## Features
 
 - Active water chemistry dashboard (pH, Free Chlorine, Total Alkalinity) with live status gauges and a metric/imperial toggle
