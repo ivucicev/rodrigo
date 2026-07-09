@@ -7,6 +7,10 @@ import type { WaterTestRow, ChemicalAdditionRow, ChoreRow, SettingsRow, Chemical
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
 
